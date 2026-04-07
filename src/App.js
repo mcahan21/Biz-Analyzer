@@ -1,25 +1,763 @@
+import { useState, useMemo, useRef } from "react";
 
+// ── utils ─────────────────────────────────────────────────────────────────────
+const fmt = (n) => { if (n == null || n === "") return null; const v = Number(String(n).replace(/[^0-9.-]/g, "")); return isNaN(v) ? null : v; };
+const fmtUSD = (n, compact = false) => { if (n == null) return "—"; if (compact && Math.abs(n) >= 1000000) return "$" + (n / 1000000).toFixed(2) + "M"; if (compact && Math.abs(n) >= 1000) return "$" + (n / 1000).toFixed(0) + "K"; return "$" + Number(n).toLocaleString("en-US", { maximumFractionDigits: 0 }); };
+const fmtPct = (n, d = 1) => n == null ? "—" : Number(n).toFixed(d) + "%";
+const fmtX = (n, d = 2) => n == null ? "—" : Number(n).toFixed(d) + "x";
+const GREEN = "#22c55e", YELLOW = "#eab308", RED = "#ef4444", BLUE = "#60a5fa", GRAY = "#475569";
+const colorFor = (pts, max) => { const p = pts / max; return p >= 0.7 ? GREEN : p >= 0.45 ? YELLOW : RED; };
 
+const EMPTY_INP = {
+  businessName: "", sde: "", askingPrice: "", revenue: "", yearsInBusiness: "",
+  sde1: "", sde2: "", sde3: "",
+  loanRate: "7.5", loanTermYears: "10", downPaymentPct: "10", sellerFinancingPct: "0",
+  ownerDependence: "", documentedProcesses: "", keyManagement: "",
+  revenueConcentration: "", recurringRevenuePct: "", employeeCount: "",
+  annualCapex: "", workingCapital: "",
+  competitiveMoat: "", industryTrend: "", leaseStatus: "", contractTransfer: "",
+};
 
-function App() {
+// ── sub-components ────────────────────────────────────────────────────────────
+function SectionHeader({ children }) {
+  return <div style={{ fontSize: "10px", fontWeight: 700, letterSpacing: "0.12em", color: GRAY, marginBottom: "14px", fontFamily: "monospace" }}>▸ {children}</div>;
+}
+
+function FieldLabel({ children, hint }) {
   return (
-    <div className="App">
-      <header className="App-header">
-       
-        <p>
-          Edit <code>src/App.js</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          Learn React
-        </a>
-      </header>
+    <div style={{ marginBottom: 5 }}>
+      <label style={{ fontSize: "10px", fontWeight: 700, letterSpacing: "0.1em", color: GRAY, textTransform: "uppercase", fontFamily: "monospace" }}>{children}</label>
+      {hint && <div style={{ fontSize: "10px", color: "#334155", marginTop: 2, fontFamily: "monospace" }}>{hint}</div>}
     </div>
   );
 }
 
-export default App;
+function TextInput({ label, hint, prefix, suffix, value, onChange, placeholder, type = "text", highlight }) {
+  return (
+    <div>
+      <FieldLabel hint={hint}>{label}</FieldLabel>
+      <div style={{
+        display: "flex", alignItems: "center",
+        background: highlight ? "rgba(52,211,153,0.07)" : "rgba(255,255,255,0.04)",
+        border: highlight ? "1px solid rgba(52,211,153,0.35)" : "1px solid rgba(255,255,255,0.09)",
+        borderRadius: 8, overflow: "hidden", transition: "all 0.3s"
+      }}>
+        {prefix && <span style={{ padding: "0 10px", color: GRAY, fontSize: 13, fontFamily: "monospace", borderRight: "1px solid rgba(255,255,255,0.07)", whiteSpace: "nowrap" }}>{prefix}</span>}
+        <input type={type} value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+          style={{ flex: 1, background: "transparent", border: "none", outline: "none", padding: "9px 11px", color: "#f1f5f9", fontSize: 13, fontFamily: "monospace" }} />
+        {suffix && <span style={{ padding: "0 10px", color: GRAY, fontSize: 11, fontFamily: "monospace", borderLeft: "1px solid rgba(255,255,255,0.07)" }}>{suffix}</span>}
+        {highlight && <span style={{ padding: "0 8px", fontSize: 10, color: GREEN, fontFamily: "monospace" }}>✦ auto</span>}
+      </div>
+    </div>
+  );
+}
+
+function Chips({ label, hint, value, onChange, options, highlight }) {
+  return (
+    <div>
+      <FieldLabel hint={hint}>{label}{highlight && <span style={{ marginLeft: 6, fontSize: 9, color: GREEN, fontFamily: "monospace" }}>✦ auto-filled</span>}</FieldLabel>
+      <div style={{ display: "flex", gap: 7, flexWrap: "wrap" }}>
+        {options.map(o => {
+          const active = value === o.value;
+          const c = o.color || BLUE;
+          return (
+            <button key={o.value} onClick={() => onChange(active ? "" : o.value)} style={{
+              padding: "7px 13px", borderRadius: 7, fontSize: 11, fontWeight: 600, fontFamily: "monospace",
+              cursor: "pointer", transition: "all 0.15s",
+              border: active ? `1px solid ${c}66` : "1px solid rgba(255,255,255,0.08)",
+              background: active ? c + "22" : "rgba(255,255,255,0.03)",
+              color: active ? c : "#475569",
+            }}>{o.label}</button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function CheckItem({ label, checked, onChange, flagged }) {
+  const c = flagged ? (checked ? RED : GREEN) : (checked ? GREEN : GRAY);
+  return (
+    <div onClick={() => onChange(!checked)} style={{ display: "flex", alignItems: "flex-start", gap: 10, cursor: "pointer", padding: "8px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+      <div style={{ width: 18, height: 18, borderRadius: 5, border: `2px solid ${c}`, background: checked ? c : "transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 10, color: "#0a0e1a", flexShrink: 0, marginTop: 1, transition: "all 0.15s" }}>
+        {checked ? "✓" : ""}
+      </div>
+      <div style={{ fontSize: 12, color: "#e2e8f0", fontFamily: "monospace", lineHeight: 1.5 }}>{label}</div>
+    </div>
+  );
+}
+
+function ScoreGauge({ score: s, max = 100 }) {
+  const pct = Math.min(100, Math.max(0, (s / max) * 100));
+  const c = pct >= 70 ? GREEN : pct >= 50 ? YELLOW : RED;
+  const verdict = pct >= 75 ? "STRONG BUY" : pct >= 62 ? "PROCEED" : pct >= 48 ? "CONDITIONAL" : pct >= 35 ? "NEGOTIATE" : "PASS";
+  return (
+    <div style={{ textAlign: "center" }}>
+      <svg width="160" height="90" viewBox="0 0 180 100">
+        <path d="M 15 95 A 75 75 0 0 1 165 95" fill="none" stroke="rgba(255,255,255,0.06)" strokeWidth="14" strokeLinecap="round" />
+        <path d="M 15 95 A 75 75 0 0 1 165 95" fill="none" stroke={c} strokeWidth="14" strokeLinecap="round"
+          strokeDasharray={`${(pct / 100) * 235} 235`}
+          style={{ filter: `drop-shadow(0 0 8px ${c}88)`, transition: "stroke-dasharray 0.9s cubic-bezier(.4,0,.2,1)" }} />
+        <text x="90" y="76" textAnchor="middle" fill={c} fontSize="30" fontWeight="800" fontFamily="'Bebas Neue', sans-serif">{Math.round(s)}</text>
+        <text x="90" y="92" textAnchor="middle" fill="#334155" fontSize="10" fontFamily="monospace">/ {max} pts</text>
+      </svg>
+      <div style={{ display: "inline-block", padding: "3px 14px", borderRadius: 4, background: c + "22", border: `1px solid ${c}44`, color: c, fontSize: 11, fontWeight: 800, letterSpacing: "0.12em", fontFamily: "monospace" }}>{verdict}</div>
+    </div>
+  );
+}
+
+function ScoreBand({ label, points, maxPoints, icon, detail, color }) {
+  const pct = maxPoints > 0 ? (points / maxPoints) * 100 : 0;
+  return (
+    <div style={{ background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, padding: "14px 16px", position: "relative", overflow: "hidden" }}>
+      <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${pct}%`, background: color + "0c", borderRight: `1px solid ${color}1a`, transition: "width 0.8s cubic-bezier(.4,0,.2,1)" }} />
+      <div style={{ position: "relative", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
+        <div style={{ flex: 1 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 4 }}>
+            <span style={{ fontSize: 14 }}>{icon}</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "#e2e8f0", fontFamily: "'Bebas Neue', sans-serif", letterSpacing: "0.05em" }}>{label}</span>
+          </div>
+          {detail && <div style={{ fontSize: 11, color: color === RED ? "#fca5a5" : color === YELLOW ? "#fde68a" : color === GREEN ? "#86efac" : "#94a3b8", fontFamily: "monospace", lineHeight: 1.5 }}>{detail}</div>}
+        </div>
+        <div style={{ textAlign: "right", flexShrink: 0 }}>
+          <span style={{ fontSize: 19, fontWeight: 800, color, fontFamily: "'Bebas Neue', sans-serif" }}>{points}</span>
+          <span style={{ fontSize: 10, color: "#334155", fontFamily: "monospace" }}>/{maxPoints}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function StatBox({ label, value, sub, color }) {
+  return (
+    <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 8, padding: "10px 14px" }}>
+      <div style={{ fontSize: 9, color: GRAY, fontFamily: "monospace", letterSpacing: "0.08em", marginBottom: 3 }}>{label}</div>
+      <div style={{ fontSize: 18, fontWeight: 800, fontFamily: "'Bebas Neue', sans-serif", color: color || "#f1f5f9", letterSpacing: "0.03em" }}>{value}</div>
+      {sub && <div style={{ fontSize: 10, color: "#334155", fontFamily: "monospace", marginTop: 2 }}>{sub}</div>}
+    </div>
+  );
+}
+
+// ── scoring ───────────────────────────────────────────────────────────────────
+function compute(inp, flags) {
+  const sde = fmt(inp.sde), price = fmt(inp.askingPrice), rev = fmt(inp.revenue);
+  const years = fmt(inp.yearsInBusiness);
+  const rate = fmt(inp.loanRate), term = fmt(inp.loanTermYears), down = fmt(inp.downPaymentPct);
+  const sellerFinPct = fmt(inp.sellerFinancingPct) || 0;
+  const recurring = fmt(inp.recurringRevenuePct), conc = fmt(inp.revenueConcentration), emps = fmt(inp.employeeCount);
+  const capex = fmt(inp.annualCapex);
+  const sde1 = fmt(inp.sde1), sde2 = fmt(inp.sde2), sde3 = fmt(inp.sde3);
+
+  let trendPts = 0, trendDetail = "", trendColor = GRAY;
+  if (sde1 && sde2 && sde3) {
+    const g1 = ((sde2 - sde1) / sde1) * 100, g2 = ((sde3 - sde2) / sde2) * 100;
+    const cagr = (Math.pow(sde3 / sde1, 0.5) - 1) * 100;
+    trendDetail = `CAGR ${fmtPct(cagr)} · Y1→Y2: ${g1 >= 0 ? "+" : ""}${fmtPct(g1)} · Y2→Y3: ${g2 >= 0 ? "+" : ""}${fmtPct(g2)}`;
+    if (cagr >= 10 && g2 > 0) { trendPts = 10; trendColor = GREEN; }
+    else if (cagr >= 5 && g2 > 0) { trendPts = 8; trendColor = GREEN; }
+    else if (cagr >= 0 && g2 >= 0) { trendPts = 5; trendColor = YELLOW; }
+    else if (cagr >= -5) { trendPts = 2; trendColor = YELLOW; }
+    else { trendPts = 0; trendColor = RED; }
+  } else if (sde) { trendPts = 3; trendColor = GRAY; trendDetail = "Only current SDE provided — trend unknown"; }
+
+  let sdePts = 0, sdeDetail = "", sdeColor = GRAY;
+  const multiple = sde && price ? price / sde : null;
+  if (sde && price) {
+    const sdeMargin = rev ? (sde / rev) * 100 : null;
+    if (sde >= 200000 && multiple <= 3.5) sdePts = 22;
+    else if (sde >= 150000 && multiple <= 4) sdePts = 18;
+    else if (sde >= 100000 && multiple <= 4.5) sdePts = 14;
+    else if (sde >= 75000 && multiple <= 5) sdePts = 9;
+    else if (sde >= 50000) sdePts = 5;
+    else sdePts = 2;
+    sdeColor = colorFor(sdePts, 22);
+    sdeDetail = `${fmtX(multiple)} multiple · SDE ${fmtUSD(sde, true)}${sdeMargin ? " · " + fmtPct(sdeMargin) + " margin" : ""}`;
+  } else if (sde) { sdePts = sde >= 150000 ? 12 : sde >= 75000 ? 7 : 3; sdeColor = colorFor(sdePts, 22); sdeDetail = `SDE ${fmtUSD(sde, true)}`; }
+
+  let dscrPts = 0, dscrDetail = "", dscrColor = GRAY, dscrVal = null, annualDS = null, cocReturn = null, payback = null;
+  if (sde && price && rate && term && down != null) {
+    const bankLoan = price * (1 - down / 100) * (1 - sellerFinPct / 100);
+    const sellerLoan = price * (1 - down / 100) * (sellerFinPct / 100);
+    const mr = rate / 100 / 12, pmts = term * 12;
+    const bankPmt = bankLoan > 0 ? bankLoan * (mr * Math.pow(1 + mr, pmts)) / (Math.pow(1 + mr, pmts) - 1) : 0;
+    const smr = 0.06 / 12, spmts = 60;
+    const sellerPmt = sellerLoan > 0 ? sellerLoan * (smr * Math.pow(1 + smr, spmts)) / (Math.pow(1 + smr, spmts) - 1) : 0;
+    annualDS = (bankPmt + sellerPmt) * 12;
+    dscrVal = sde / annualDS;
+    const capexAdj = capex || 0;
+    const freeCash = sde - capexAdj - annualDS;
+    const equity = price * (down / 100);
+    cocReturn = equity > 0 ? (freeCash / equity) * 100 : null;
+    payback = freeCash > 0 ? equity / freeCash : null;
+    dscrDetail = `DSCR ${fmtX(dscrVal)} · Debt svc ${fmtUSD(annualDS, true)}/yr · Free cash ${fmtUSD(freeCash, true)}/yr`;
+    if (dscrVal >= 1.5) { dscrPts = 22; dscrColor = GREEN; }
+    else if (dscrVal >= 1.25) { dscrPts = 17; dscrColor = GREEN; }
+    else if (dscrVal >= 1.1) { dscrPts = 11; dscrColor = YELLOW; }
+    else if (dscrVal >= 1.0) { dscrPts = 6; dscrColor = YELLOW; }
+    else { dscrPts = 0; dscrColor = RED; }
+  } else { dscrDetail = "Enter asking price, loan terms & down payment"; }
+
+  let ownerPts = 0, ownerDetail = "", ownerColor = GRAY;
+  const ownerMap = { low: 14, medium: 7, high: 2 }, docMap = { yes: 4, partial: 2, no: 0 }, mgmtMap = { yes: 4, partial: 2, no: 0 };
+  if (inp.ownerDependence) {
+    ownerPts = Math.min(18, (ownerMap[inp.ownerDependence] || 0) + (docMap[inp.documentedProcesses] || 0) + (mgmtMap[inp.keyManagement] || 0));
+    ownerColor = colorFor(ownerPts, 18);
+    const parts = [];
+    if (inp.ownerDependence === "low") parts.push("Low dependency"); if (inp.ownerDependence === "high") parts.push("High key-man risk");
+    if (inp.documentedProcesses === "yes") parts.push("SOPs documented"); if (inp.keyManagement === "yes") parts.push("Strong mgmt");
+    ownerDetail = parts.join(" · ");
+  }
+
+  let agePts = 0, ageDetail = "", ageColor = GRAY;
+  if (years != null) {
+    if (years >= 15) { agePts = 12; ageColor = GREEN; ageDetail = `${years} yrs — highly established`; }
+    else if (years >= 10) { agePts = 10; ageColor = GREEN; ageDetail = `${years} yrs — strong track record`; }
+    else if (years >= 7) { agePts = 8; ageColor = GREEN; ageDetail = `${years} yrs — comfortably exceeds threshold`; }
+    else if (years >= 5) { agePts = 5; ageColor = YELLOW; ageDetail = `${years} yrs — meets 5-yr minimum`; }
+    else if (years >= 3) { agePts = 2; ageColor = RED; ageDetail = `${years} yrs — below minimum`; }
+    else { agePts = 0; ageColor = RED; ageDetail = `${years} yrs — too early stage`; }
+  }
+
+  const concPts = conc != null ? (conc <= 15 ? 5 : conc <= 25 ? 3 : conc <= 40 ? 1 : 0) : 0;
+  const recPts = recurring != null ? (recurring >= 60 ? 5 : recurring >= 30 ? 3 : recurring >= 10 ? 1 : 0) : 0;
+  const empPts = emps != null ? (emps >= 8 ? 3 : emps >= 3 ? 2 : 1) : 0;
+  const revPts = concPts + recPts + empPts;
+  const revColor = colorFor(revPts, 13);
+  const rp = []; if (conc != null) rp.push(`Top customer ${conc}%`); if (recurring != null) rp.push(`${recurring}% recurring`); if (emps != null) rp.push(`${emps} FTE`);
+  const revDetail = rp.join(" · ") || "Fill in revenue quality fields";
+
+  let capexPts = 0, capexDetail = "", capexColor = GRAY;
+  if (capex != null || fmt(inp.workingCapital) != null) {
+    const capexBurden = sde && capex ? (capex / sde) * 100 : null;
+    const wcMonths = rev && fmt(inp.workingCapital) ? (fmt(inp.workingCapital) / (rev / 12)) : null;
+    const c1 = capexBurden != null ? (capexBurden <= 10 ? 4 : capexBurden <= 20 ? 2 : 0) : 2;
+    const c2 = wcMonths != null ? (wcMonths <= 1.5 ? 4 : wcMonths <= 3 ? 2 : 0) : 2;
+    capexPts = c1 + c2; capexColor = colorFor(capexPts, 8);
+    const cp = []; if (capexBurden != null) cp.push(`CapEx ${fmtPct(capexBurden)} of SDE`); if (wcMonths != null) cp.push(`WC ${wcMonths.toFixed(1)} mo revenue`);
+    capexDetail = cp.join(" · ");
+  }
+
+  const moatMap = { strong: 5, moderate: 3, weak: 0 }, industryMap = { growing: 4, stable: 3, declining: 0 };
+  const leaseMap = { owned: 3, favorable: 3, short: 1, none: 0 }, contractMap = { yes: 3, partial: 1, no: 0 };
+  const m = moatMap[inp.competitiveMoat] ?? null, ind = industryMap[inp.industryTrend] ?? null;
+  const l = leaseMap[inp.leaseStatus] ?? null, ct = contractMap[inp.contractTransfer] ?? null;
+  let riskPts = 0, riskDetail = "", riskColor = GRAY;
+  if (m != null || ind != null || l != null || ct != null) {
+    riskPts = (m ?? 2) + (ind ?? 2) + (l ?? 1) + (ct ?? 1); riskColor = colorFor(riskPts, 15);
+    const rp2 = []; if (inp.competitiveMoat) rp2.push(`${inp.competitiveMoat} moat`); if (inp.industryTrend) rp2.push(`${inp.industryTrend} industry`); if (inp.leaseStatus) rp2.push(`lease: ${inp.leaseStatus}`);
+    riskDetail = rp2.join(" · ");
+  }
+
+  const flagCount = flags.filter(Boolean).length;
+  let flagPts = Math.max(0, 12 - flagCount * 3);
+  const flagColor = flagCount === 0 ? GREEN : flagCount <= 2 ? YELLOW : RED;
+  const flagDetail = flags.some(Boolean) ? `${flagCount} red flag(s) present` : "No red flags";
+
+  const total = sdePts + trendPts + dscrPts + ownerPts + agePts + revPts + capexPts + riskPts + flagPts;
+  const maxTotal = 22 + 10 + 22 + 18 + 12 + 13 + 8 + 15 + 12;
+  return {
+    total, maxTotal,
+    criteria: {
+      sde: { icon: "💰", label: "SDE Quality & Multiple", points: sdePts, maxPoints: 22, color: sdeColor, detail: sdeDetail },
+      trend: { icon: "📈", label: "SDE Trend (3yr)", points: trendPts, maxPoints: 10, color: trendColor, detail: trendDetail },
+      dscr: { icon: "🏦", label: "Debt Service Coverage", points: dscrPts, maxPoints: 22, color: dscrColor, detail: dscrDetail },
+      owner: { icon: "👤", label: "Owner Independence", points: ownerPts, maxPoints: 18, color: ownerColor, detail: ownerDetail },
+      age: { icon: "📅", label: "Business Longevity", points: agePts, maxPoints: 12, color: ageColor, detail: ageDetail },
+      rev: { icon: "📊", label: "Revenue Quality", points: revPts, maxPoints: 13, color: revColor, detail: revDetail },
+      capex: { icon: "🔧", label: "CapEx & Working Capital", points: capexPts, maxPoints: 8, color: capexColor, detail: capexDetail },
+      risk: { icon: "🛡", label: "Risk Factors", points: riskPts, maxPoints: 15, color: riskColor, detail: riskDetail },
+      flags: { icon: "🚩", label: "Red Flags", points: flagPts, maxPoints: 12, color: flagColor, detail: flagDetail },
+    },
+    dscrVal, annualDS, cocReturn, payback, multiple,
+  };
+}
+
+const TABS = ["PROFILE", "TREND", "FINANCING", "OWNERSHIP", "REVENUE", "RISK"];
+const FLAG_DEFS = [
+  "Pending litigation or legal disputes",
+  "Tax returns don't match P&L / add-backs look aggressive",
+  "Revenue declining in most recent year",
+  "Owner unwilling to provide transition support (90+ days)",
+  "Lease expires within 2 years with no renewal option",
+  "Single customer >40% of revenue",
+  "Key licenses tied to current owner personally",
+  "Deferred maintenance / significant capex needed immediately",
+];
+
+// ── PDF Upload Panel ──────────────────────────────────────────────────────────
+function PdfUploader({ onExtracted, onError }) {
+  const [state, setState] = useState("idle"); // idle | reading | extracting | done | error
+  const [fileName, setFileName] = useState("");
+  const [log, setLog] = useState("");
+  const fileRef = useRef();
+
+  const handleFile = async (file) => {
+    if (!file || file.type !== "application/pdf") { onError("Please upload a PDF file."); return; }
+    setFileName(file.name);
+    setState("reading");
+    setLog("Reading PDF...");
+
+    // Convert to base64
+    const base64 = await new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(r.result.split(",")[1]);
+      r.onerror = () => rej(new Error("Failed to read file"));
+      r.readAsDataURL(file);
+    });
+
+    setState("extracting");
+    setLog("Sending to Claude for extraction...");
+
+    const prompt = `You are an M&A analyst. Extract all available financial and business information from this PDF document (broker listing, CIM, or financial summary).
+
+Return ONLY a valid JSON object with these exact keys (use null for anything not found):
+{
+  "businessName": "string or null",
+  "askingPrice": "number only, no $ or commas, or null",
+  "sde": "number only, or null",
+  "revenue": "number only, or null",
+  "yearsInBusiness": "number only, or null",
+  "sde1": "SDE from oldest year available, number or null",
+  "sde2": "SDE from middle year, number or null",
+  "sde3": "SDE from most recent year, number or null",
+  "revenueConcentration": "top customer % of revenue as number, or null",
+  "recurringRevenuePct": "recurring revenue % as number, or null",
+  "employeeCount": "number or null",
+  "annualCapex": "annual capex as number, or null",
+  "workingCapital": "working capital requirement as number, or null",
+  "ownerDependence": "low, medium, or high — infer from description, or null",
+  "documentedProcesses": "yes, partial, or no — infer if mentioned, or null",
+  "keyManagement": "yes, partial, or no — infer if mentioned, or null",
+  "industryTrend": "growing, stable, or declining — infer from context, or null",
+  "leaseStatus": "owned, favorable, short, or none — infer from lease info, or null",
+  "contractTransfer": "yes, partial, or no — infer if mentioned, or null",
+  "competitiveMoat": "strong, moderate, or weak — infer from description, or null",
+  "extractionNotes": "brief note on what was and wasn't found in the document"
+}
+
+Return ONLY the JSON object. No explanation, no markdown, no backticks.`;
+
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1500,
+          messages: [{
+            role: "user",
+            content: [
+              { type: "document", source: { type: "base64", media_type: "application/pdf", data: base64 } },
+              { type: "text", text: prompt }
+            ]
+          }]
+        })
+      });
+      const data = await res.json();
+      const raw = (data.content || []).map(b => b.type === "text" ? b.text : "").join("");
+      const clean = raw.replace(/```json|```/g, "").trim();
+      const parsed = JSON.parse(clean);
+      setState("done");
+      setLog(parsed.extractionNotes || "Extraction complete.");
+      onExtracted(parsed);
+    } catch (e) {
+      setState("error");
+      setLog("Extraction failed — try a cleaner PDF or enter details manually.");
+      onError("Could not parse PDF. Please check the file and try again.");
+    }
+  };
+
+  const colors = { idle: GRAY, reading: BLUE, extracting: YELLOW, done: GREEN, error: RED };
+  const stateColor = colors[state] || GRAY;
+
+  return (
+    <div style={{
+      border: `2px dashed ${state === "idle" ? "rgba(255,255,255,0.1)" : stateColor + "66"}`,
+      borderRadius: 14, padding: 24, textAlign: "center",
+      background: state === "done" ? "rgba(34,197,94,0.05)" : state === "error" ? "rgba(239,68,68,0.05)" : "rgba(255,255,255,0.02)",
+      transition: "all 0.3s", cursor: state === "idle" ? "pointer" : "default",
+    }}
+      onClick={() => state === "idle" && fileRef.current?.click()}
+      onDragOver={e => e.preventDefault()}
+      onDrop={e => { e.preventDefault(); handleFile(e.dataTransfer.files[0]); }}
+    >
+      <input ref={fileRef} type="file" accept=".pdf" style={{ display: "none" }} onChange={e => handleFile(e.target.files[0])} />
+      <div style={{ fontSize: 28, marginBottom: 10 }}>
+        {state === "idle" ? "📄" : state === "done" ? "✅" : state === "error" ? "❌" : "⟳"}
+      </div>
+      {state === "idle" && (
+        <>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#94a3b8", fontFamily: "monospace", marginBottom: 6 }}>Drop a broker PDF / CIM here</div>
+          <div style={{ fontSize: 11, color: "#334155", fontFamily: "monospace" }}>or click to browse · Claude will auto-extract all fields</div>
+        </>
+      )}
+      {state !== "idle" && (
+        <>
+          <div style={{ fontSize: 12, fontWeight: 700, color: stateColor, fontFamily: "monospace", marginBottom: 4, animation: state === "extracting" || state === "reading" ? "pulse 1.5s ease infinite" : "none" }}>
+            {state === "reading" ? "Reading file..." : state === "extracting" ? "Extracting data..." : state === "done" ? "Auto-fill complete" : "Extraction failed"}
+          </div>
+          {fileName && <div style={{ fontSize: 10, color: "#475569", fontFamily: "monospace", marginBottom: 6 }}>{fileName}</div>}
+          {log && <div style={{ fontSize: 11, color: state === "done" ? "#86efac" : "#94a3b8", fontFamily: "monospace", lineHeight: 1.6 }}>{log}</div>}
+          {(state === "done" || state === "error") && (
+            <button onClick={(e) => { e.stopPropagation(); setState("idle"); setFileName(""); setLog(""); fileRef.current.value = ""; }} style={{
+              marginTop: 12, padding: "5px 14px", borderRadius: 6, border: "1px solid rgba(255,255,255,0.1)",
+              background: "transparent", color: GRAY, fontSize: 11, fontFamily: "monospace", cursor: "pointer"
+            }}>Upload another</button>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── main ──────────────────────────────────────────────────────────────────────
+export default function App() {
+  const [tab, setTab] = useState(0);
+  const [analyzed, setAnalyzed] = useState(false);
+  const [aiText, setAiText] = useState(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [inp, setInp] = useState({ ...EMPTY_INP });
+  const [flags, setFlags] = useState(new Array(FLAG_DEFS.length).fill(false));
+  const [autoFilled, setAutoFilled] = useState({});
+  const [pdfError, setPdfError] = useState(null);
+
+  const set = k => v => setInp(p => ({ ...p, [k]: v }));
+  const toggleFlag = i => setFlags(f => { const n = [...f]; n[i] = !n[i]; return n; });
+
+  const handleExtracted = (data) => {
+    const mapping = {
+      businessName: "businessName", askingPrice: "askingPrice", sde: "sde",
+      revenue: "revenue", yearsInBusiness: "yearsInBusiness",
+      sde1: "sde1", sde2: "sde2", sde3: "sde3",
+      revenueConcentration: "revenueConcentration", recurringRevenuePct: "recurringRevenuePct",
+      employeeCount: "employeeCount", annualCapex: "annualCapex", workingCapital: "workingCapital",
+      ownerDependence: "ownerDependence", documentedProcesses: "documentedProcesses",
+      keyManagement: "keyManagement", industryTrend: "industryTrend",
+      leaseStatus: "leaseStatus", contractTransfer: "contractTransfer", competitiveMoat: "competitiveMoat",
+    };
+    const newInp = { ...inp };
+    const filled = {};
+    for (const [src, dst] of Object.entries(mapping)) {
+      if (data[src] != null && data[src] !== "") {
+        newInp[dst] = String(data[src]);
+        filled[dst] = true;
+      }
+    }
+    setInp(newInp);
+    setAutoFilled(filled);
+    setPdfError(null);
+    // jump to profile tab to show filled data
+    setTab(0);
+  };
+
+  const scores = useMemo(() => analyzed ? compute(inp, flags) : null, [analyzed, inp, flags]);
+
+  const runAnalysis = async () => {
+    setAnalyzed(true);
+    const s = compute(inp, flags);
+    setAiText(null);
+    setAiLoading(true);
+    const activeFlags = FLAG_DEFS.filter((_, i) => flags[i]);
+    const prompt = `You are a senior M&A analyst specializing in small business acquisitions (search fund / ETA style). Write a concise, direct investment memo in 6-8 sentences. No fluff. Conclude with a clear BUY / NEGOTIATE / PASS verdict with a one-line rationale.
+
+Business: ${inp.businessName || "Target"}
+Asking Price: ${fmtUSD(fmt(inp.askingPrice))} | SDE: ${fmtUSD(fmt(inp.sde))} | Revenue: ${fmtUSD(fmt(inp.revenue))}
+SDE Multiple: ${s.multiple ? fmtX(s.multiple) : "N/A"} | Years Operating: ${inp.yearsInBusiness || "N/A"}
+SDE Trend: ${inp.sde1 ? fmtUSD(fmt(inp.sde1)) : "?"} → ${inp.sde2 ? fmtUSD(fmt(inp.sde2)) : "?"} → ${inp.sde3 ? fmtUSD(fmt(inp.sde3)) : "?"}
+DSCR: ${s.dscrVal ? fmtX(s.dscrVal) : "N/A"} | CoC: ${s.cocReturn ? fmtPct(s.cocReturn) : "N/A"} | Payback: ${s.payback ? s.payback.toFixed(1) + " yrs" : "N/A"}
+Loan: ${inp.loanRate}% / ${inp.loanTermYears}yr | Down: ${inp.downPaymentPct}% | Seller fin: ${inp.sellerFinancingPct}%
+Owner Dep: ${inp.ownerDependence || "N/A"} | SOPs: ${inp.documentedProcesses || "N/A"} | Mgmt: ${inp.keyManagement || "N/A"}
+Recurring: ${inp.recurringRevenuePct ? inp.recurringRevenuePct + "%" : "N/A"} | Top customer: ${inp.revenueConcentration ? inp.revenueConcentration + "%" : "N/A"} | Employees: ${inp.employeeCount || "N/A"}
+Moat: ${inp.competitiveMoat || "N/A"} | Industry: ${inp.industryTrend || "N/A"} | Lease: ${inp.leaseStatus || "N/A"}
+CapEx/yr: ${fmtUSD(fmt(inp.annualCapex))} | Working capital: ${fmtUSD(fmt(inp.workingCapital))}
+Red flags: ${activeFlags.length > 0 ? activeFlags.join("; ") : "None"}
+Score: ${s.total}/${s.maxTotal}`;
+
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user", content: prompt }] })
+      });
+      const data = await res.json();
+      setAiText((data.content || []).map(b => b.type === "text" ? b.text : "").join(""));
+    } catch { setAiText("Analysis unavailable. Please try again."); }
+    finally { setAiLoading(false); }
+  };
+
+  const autoFillCount = Object.keys(autoFilled).length;
+  const panel = { background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 14, padding: 22 };
+  const h = (k) => !!autoFilled[k];
+
+  return (
+    <div style={{ minHeight: "100vh", background: "#080c14", color: "#e2e8f0" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500;600;700&display=swap');
+        @keyframes fadeUp{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.35}}
+        @keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
+        input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none}
+        input::placeholder{color:#1e293b}
+        input:focus{border-color:rgba(99,102,241,0.5)!important;outline:none}
+        *{box-sizing:border-box}
+        ::-webkit-scrollbar{width:5px}
+        ::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.08);border-radius:3px}
+      `}</style>
+
+      {/* Header */}
+      <div style={{ borderBottom: "1px solid rgba(255,255,255,0.05)", padding: "18px 32px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ width: 36, height: 36, background: "linear-gradient(135deg, #0f2444, #4f46e5)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17 }}>📈</div>
+          <div>
+            <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 20, letterSpacing: "0.08em", color: "#f8fafc" }}>ACQUISITION ANALYZER</div>
+            <div style={{ fontSize: 9, color: "#1e293b", letterSpacing: "0.1em", fontFamily: "monospace" }}>SMALL BUSINESS M&A · DUE DILIGENCE SCORECARD</div>
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          {autoFillCount > 0 && (
+            <div style={{ fontSize: 10, color: GREEN, fontFamily: "monospace", display: "flex", alignItems: "center", gap: 5 }}>
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: GREEN, display: "inline-block" }} />
+              {autoFillCount} fields auto-filled from PDF
+            </div>
+          )}
+          {scores && <div style={{ fontSize: 11, color: GRAY, fontFamily: "monospace" }}>SCORE <span style={{ color: colorFor(scores.total, scores.maxTotal * 0.7), fontWeight: 700 }}>{scores.total}/{scores.maxTotal}</span></div>}
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "420px 1fr", gap: 24, maxWidth: 1180, margin: "0 auto", padding: "28px 24px", alignItems: "start" }}>
+
+        {/* LEFT */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+
+          {/* PDF Upload */}
+          <div style={panel}>
+            <SectionHeader>AUTO-FILL FROM PDF</SectionHeader>
+            <PdfUploader onExtracted={handleExtracted} onError={setPdfError} />
+            {pdfError && <div style={{ marginTop: 8, fontSize: 11, color: RED, fontFamily: "monospace" }}>{pdfError}</div>}
+            {autoFillCount > 0 && (
+              <div style={{ marginTop: 10, padding: "8px 12px", background: "rgba(34,197,94,0.07)", border: "1px solid rgba(34,197,94,0.2)", borderRadius: 8, fontSize: 11, color: "#86efac", fontFamily: "monospace" }}>
+                ✦ {autoFillCount} fields populated — review each tab and fill any gaps, then run analysis.
+              </div>
+            )}
+          </div>
+
+          {/* Tabs */}
+          <div style={{ display: "flex", gap: 2, background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, padding: 4 }}>
+            {TABS.map((t, i) => (
+              <button key={t} onClick={() => setTab(i)} style={{
+                flex: 1, padding: "6px 4px", borderRadius: 7, border: "none", cursor: "pointer",
+                fontSize: 9, fontWeight: 700, letterSpacing: "0.07em", fontFamily: "monospace",
+                background: tab === i ? "rgba(99,102,241,0.25)" : "transparent",
+                color: tab === i ? "#a5b4fc" : "#334155", transition: "all 0.15s",
+              }}>{t}</button>
+            ))}
+          </div>
+
+          {/* PROFILE */}
+          {tab === 0 && (
+            <div style={panel}>
+              <SectionHeader>Business Profile</SectionHeader>
+              <div style={{ display: "flex", flexDirection: "column", gap: 13 }}>
+                <TextInput label="Business Name" value={inp.businessName} onChange={set("businessName")} placeholder="Acme Plumbing LLC" highlight={h("businessName")} />
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <TextInput label="Asking Price" prefix="$" value={inp.askingPrice} onChange={set("askingPrice")} placeholder="500,000" type="number" highlight={h("askingPrice")} />
+                  <TextInput label="Annual SDE" prefix="$" value={inp.sde} onChange={set("sde")} placeholder="150,000" hint="Current year" type="number" highlight={h("sde")} />
+                  <TextInput label="Annual Revenue" prefix="$" value={inp.revenue} onChange={set("revenue")} placeholder="800,000" type="number" highlight={h("revenue")} />
+                  <TextInput label="Years in Business" value={inp.yearsInBusiness} onChange={set("yearsInBusiness")} placeholder="8" suffix="yrs" type="number" highlight={h("yearsInBusiness")} />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* TREND */}
+          {tab === 1 && (
+            <div style={panel}>
+              <SectionHeader>3-Year SDE Trend</SectionHeader>
+              <div style={{ fontSize: 11, color: "#334155", fontFamily: "monospace", marginBottom: 14, lineHeight: 1.6 }}>Enter SDE for the last 3 years (oldest first). A declining trend is a major red flag regardless of current SDE.</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                <TextInput label="Year 1 SDE (3 years ago)" prefix="$" value={inp.sde1} onChange={set("sde1")} placeholder="120,000" type="number" highlight={h("sde1")} />
+                <TextInput label="Year 2 SDE (2 years ago)" prefix="$" value={inp.sde2} onChange={set("sde2")} placeholder="135,000" type="number" highlight={h("sde2")} />
+                <TextInput label="Year 3 SDE (most recent)" prefix="$" value={inp.sde3} onChange={set("sde3")} placeholder="150,000" hint="Should match SDE on Profile tab" type="number" highlight={h("sde3")} />
+              </div>
+              {fmt(inp.sde1) && fmt(inp.sde2) && fmt(inp.sde3) && (() => {
+                const s1 = fmt(inp.sde1), s2 = fmt(inp.sde2), s3 = fmt(inp.sde3);
+                const cagr = (Math.pow(s3 / s1, 0.5) - 1) * 100;
+                const c = cagr >= 5 ? GREEN : cagr >= 0 ? YELLOW : RED;
+                const max = Math.max(s1, s2, s3);
+                return (
+                  <div style={{ marginTop: 18 }}>
+                    <div style={{ display: "flex", alignItems: "flex-end", gap: 8, height: 80, marginBottom: 8 }}>
+                      {[s1, s2, s3].map((v, i) => (
+                        <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 4 }}>
+                          <div style={{ fontSize: 9, color: GRAY, fontFamily: "monospace" }}>{fmtUSD(v, true)}</div>
+                          <div style={{ width: "100%", background: c + "44", border: `1px solid ${c}66`, borderRadius: "4px 4px 0 0", height: `${(v / max) * 60}px`, transition: "height 0.5s" }} />
+                        </div>
+                      ))}
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "#334155", fontFamily: "monospace" }}>
+                      <span>3 YRS AGO</span><span>2 YRS AGO</span><span>CURRENT</span>
+                    </div>
+                    <div style={{ marginTop: 10, padding: "8px 12px", background: c + "11", border: `1px solid ${c}33`, borderRadius: 6, fontSize: 11, color: c, fontFamily: "monospace" }}>
+                      CAGR: {fmtPct(cagr)} · {cagr >= 5 ? "Strong growth ✓" : cagr >= 0 ? "Flat / marginal growth" : "⚠ Declining — investigate"}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+          {/* FINANCING */}
+          {tab === 2 && (
+            <div style={panel}>
+              <SectionHeader>Financing & Returns</SectionHeader>
+              <div style={{ display: "flex", flexDirection: "column", gap: 13 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <TextInput label="Bank Loan Rate" value={inp.loanRate} onChange={set("loanRate")} placeholder="7.5" suffix="%" hint="SBA ~7–8%" type="number" />
+                  <TextInput label="Loan Term" value={inp.loanTermYears} onChange={set("loanTermYears")} placeholder="10" suffix="yrs" type="number" />
+                  <TextInput label="Down Payment" value={inp.downPaymentPct} onChange={set("downPaymentPct")} placeholder="10" suffix="%" hint="SBA min 10%" type="number" />
+                  <TextInput label="Seller Financing %" value={inp.sellerFinancingPct} onChange={set("sellerFinancingPct")} placeholder="0" suffix="% of balance" hint="Reduces bank loan" type="number" />
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <TextInput label="Annual CapEx" prefix="$" value={inp.annualCapex} onChange={set("annualCapex")} placeholder="20,000" hint="Maintenance + replacement" type="number" highlight={h("annualCapex")} />
+                  <TextInput label="Working Capital Req." prefix="$" value={inp.workingCapital} onChange={set("workingCapital")} placeholder="50,000" hint="Cash needed to operate" type="number" highlight={h("workingCapital")} />
+                </div>
+                {scores && (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 4 }}>
+                    <StatBox label="DSCR" value={scores.dscrVal ? fmtX(scores.dscrVal) : "—"} color={scores.dscrVal >= 1.25 ? GREEN : scores.dscrVal >= 1.0 ? YELLOW : RED} sub="≥1.25x target" />
+                    <StatBox label="CASH-ON-CASH" value={scores.cocReturn ? fmtPct(scores.cocReturn, 0) : "—"} color={scores.cocReturn >= 20 ? GREEN : scores.cocReturn >= 12 ? YELLOW : RED} sub="on equity" />
+                    <StatBox label="PAYBACK" value={scores.payback ? scores.payback.toFixed(1) + " yrs" : "—"} color={scores.payback <= 4 ? GREEN : scores.payback <= 7 ? YELLOW : RED} sub="equity recovery" />
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* OWNERSHIP */}
+          {tab === 3 && (
+            <div style={panel}>
+              <SectionHeader>Owner Dependency & Transition</SectionHeader>
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                <Chips label="Owner Dependence Level" hint="How critical is the current owner to daily ops and client relationships?"
+                  value={inp.ownerDependence} onChange={set("ownerDependence")} highlight={h("ownerDependence")}
+                  options={[{ value: "low", label: "Low", color: GREEN }, { value: "medium", label: "Medium", color: YELLOW }, { value: "high", label: "High", color: RED }]} />
+                <Chips label="Documented Processes / SOPs" hint="Are operations documented so a new owner can learn the business?"
+                  value={inp.documentedProcesses} onChange={set("documentedProcesses")} highlight={h("documentedProcesses")}
+                  options={[{ value: "yes", label: "Fully documented", color: GREEN }, { value: "partial", label: "Partial", color: YELLOW }, { value: "no", label: "Not documented", color: RED }]} />
+                <Chips label="Management / Staff in Place" hint="Is there a management layer independent of the owner?"
+                  value={inp.keyManagement} onChange={set("keyManagement")} highlight={h("keyManagement")}
+                  options={[{ value: "yes", label: "Strong team", color: GREEN }, { value: "partial", label: "Some mgmt", color: YELLOW }, { value: "no", label: "Owner-only", color: RED }]} />
+              </div>
+            </div>
+          )}
+
+          {/* REVENUE */}
+          {tab === 4 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div style={panel}>
+                <SectionHeader>Revenue Quality</SectionHeader>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
+                  <TextInput label="Top Customer %" value={inp.revenueConcentration} onChange={set("revenueConcentration")} placeholder="20" suffix="%" hint="% rev from #1 customer" type="number" highlight={h("revenueConcentration")} />
+                  <TextInput label="Recurring Revenue" value={inp.recurringRevenuePct} onChange={set("recurringRevenuePct")} placeholder="40" suffix="%" hint="Contracts, retainers" type="number" highlight={h("recurringRevenuePct")} />
+                  <TextInput label="Employee Count" value={inp.employeeCount} onChange={set("employeeCount")} placeholder="6" suffix="FTE" type="number" highlight={h("employeeCount")} />
+                </div>
+              </div>
+              <div style={panel}>
+                <SectionHeader>Red Flag Checklist</SectionHeader>
+                {FLAG_DEFS.map((f, i) => <CheckItem key={i} label={f} flagged checked={flags[i]} onChange={() => toggleFlag(i)} />)}
+                <div style={{ marginTop: 10, fontSize: 11, color: flags.filter(Boolean).length === 0 ? GREEN : RED, fontFamily: "monospace" }}>
+                  {flags.filter(Boolean).length === 0 ? "✓ No red flags" : `⚠ ${flags.filter(Boolean).length} red flag(s) — investigate before proceeding`}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* RISK */}
+          {tab === 5 && (
+            <div style={panel}>
+              <SectionHeader>Risk Factors</SectionHeader>
+              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+                <Chips label="Competitive Moat" hint="What prevents competitors from replicating this business?"
+                  value={inp.competitiveMoat} onChange={set("competitiveMoat")} highlight={h("competitiveMoat")}
+                  options={[{ value: "strong", label: "Strong (licenses, contracts, location)", color: GREEN }, { value: "moderate", label: "Moderate", color: YELLOW }, { value: "weak", label: "Weak / commodity", color: RED }]} />
+                <Chips label="Industry Trend" hint="Is the underlying market growing, stable, or contracting?"
+                  value={inp.industryTrend} onChange={set("industryTrend")} highlight={h("industryTrend")}
+                  options={[{ value: "growing", label: "Growing", color: GREEN }, { value: "stable", label: "Stable", color: YELLOW }, { value: "declining", label: "Declining", color: RED }]} />
+                <Chips label="Real Estate / Lease" hint="Location security — does the lease transfer and for how long?"
+                  value={inp.leaseStatus} onChange={set("leaseStatus")} highlight={h("leaseStatus")}
+                  options={[{ value: "owned", label: "Owned", color: GREEN }, { value: "favorable", label: "Long-term lease (5+ yrs)", color: GREEN }, { value: "short", label: "Short lease (<3 yrs)", color: YELLOW }, { value: "none", label: "No fixed location", color: BLUE }]} />
+                <Chips label="Customer Contract Transferability"
+                  value={inp.contractTransfer} onChange={set("contractTransfer")} highlight={h("contractTransfer")}
+                  options={[{ value: "yes", label: "Auto-transfer", color: GREEN }, { value: "partial", label: "Most transfer", color: YELLOW }, { value: "no", label: "Consent required", color: RED }]} />
+              </div>
+            </div>
+          )}
+
+          <button onClick={runAnalysis} style={{
+            width: "100%", padding: 15, borderRadius: 10, border: "none",
+            background: "linear-gradient(135deg, #0f2444 0%, #4f46e5 100%)",
+            color: "#fff", fontSize: 12, fontWeight: 700, fontFamily: "monospace",
+            letterSpacing: "0.1em", cursor: "pointer", boxShadow: "0 4px 24px rgba(79,70,229,0.3)",
+          }}>▸ RUN ACQUISITION ANALYSIS</button>
+        </div>
+
+        {/* RIGHT */}
+        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+          {!analyzed && (
+            <div style={{ ...panel, padding: "64px 32px", textAlign: "center" }}>
+              <div style={{ fontSize: 40, marginBottom: 14 }}>🔍</div>
+              <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 18, letterSpacing: "0.08em", color: "#1e293b", marginBottom: 8 }}>AWAITING ANALYSIS</div>
+              <div style={{ fontSize: 11, color: "#1e293b", fontFamily: "monospace" }}>Upload a PDF to auto-fill fields, or enter details manually, then run analysis</div>
+            </div>
+          )}
+          {scores && (
+            <div style={{ animation: "fadeUp 0.5s ease both" }}>
+              <div style={{ ...panel, display: "flex", alignItems: "center", gap: 20, marginBottom: 14 }}>
+                <ScoreGauge score={scores.total} max={scores.maxTotal} />
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: "'Bebas Neue', sans-serif", fontSize: 24, color: "#f8fafc", letterSpacing: "0.04em", lineHeight: 1 }}>{inp.businessName || "Target Business"}</div>
+                  <div style={{ fontSize: 10, color: GRAY, fontFamily: "monospace", marginTop: 3, marginBottom: 14 }}>ACQUISITION SCORECARD</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7 }}>
+                    <StatBox label="MULTIPLE" value={scores.multiple ? fmtX(scores.multiple) : "—"} color={scores.multiple <= 4 ? GREEN : scores.multiple <= 5 ? YELLOW : RED} />
+                    <StatBox label="DSCR" value={scores.dscrVal ? fmtX(scores.dscrVal) : "—"} color={scores.dscrVal >= 1.25 ? GREEN : scores.dscrVal >= 1.0 ? YELLOW : RED} />
+                    <StatBox label="COC RETURN" value={scores.cocReturn ? fmtPct(scores.cocReturn, 0) : "—"} color={scores.cocReturn >= 20 ? GREEN : scores.cocReturn >= 12 ? YELLOW : RED} />
+                  </div>
+                </div>
+              </div>
+              <div style={{ ...panel, marginBottom: 14 }}>
+                <div style={{ display: "flex", gap: 2, height: 10, borderRadius: 5, overflow: "hidden", marginBottom: 8 }}>
+                  {Object.values(scores.criteria).map((c, i) =>
+                    c.points > 0 ? <div key={i} style={{ width: `${(c.points / scores.maxTotal) * 100}%`, background: c.color, opacity: 0.8, transition: "width 0.8s" }} /> : null
+                  )}
+                  <div style={{ flex: 1, background: "rgba(255,255,255,0.04)" }} />
+                </div>
+                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                  {Object.values(scores.criteria).map((c, i) => (
+                    <span key={i} style={{ fontSize: 9, color: GRAY, fontFamily: "monospace", display: "flex", alignItems: "center", gap: 4 }}>
+                      <span style={{ width: 7, height: 7, borderRadius: 2, background: c.color, display: "inline-block" }} />{c.icon} {c.points}/{c.maxPoints}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              {Object.values(scores.criteria).map((c, i) => (
+                <div key={i} style={{ marginBottom: 8, animation: `fadeUp 0.4s ease ${i * 0.05}s both` }}>
+                  <ScoreBand {...c} />
+                </div>
+              ))}
+              {aiLoading && (
+                <div style={{ ...panel, textAlign: "center", padding: 28, color: GRAY, fontFamily: "monospace", fontSize: 12, animation: "pulse 1.5s ease infinite", marginTop: 8 }}>
+                  ⟳ Generating analyst memo...
+                </div>
+              )}
+              {aiText && (
+                <div style={{ background: "rgba(79,70,229,0.05)", border: "1px solid rgba(79,70,229,0.18)", borderRadius: 12, padding: 22, marginTop: 8 }}>
+                  <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.12em", color: "#6366f1", marginBottom: 12, fontFamily: "monospace" }}>▸ AI ANALYST MEMO</div>
+                  <div style={{ fontSize: 12, color: "#cbd5e1", lineHeight: 1.85, fontFamily: "monospace", whiteSpace: "pre-wrap" }}>{aiText}</div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
