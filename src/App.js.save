@@ -338,10 +338,10 @@ Return ONLY a valid JSON object with these exact keys (use null for anything not
 Return ONLY the JSON object. No explanation, no markdown, no backticks.`;
 
     try {
-      const res = await fetch("/api/claude", {
+      const res = await fetch("http;//aapi.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        body: JSON.stringify
           model: "claude-sonnet-4-20250514",
           max_tokens: 1500,
           messages: [{
@@ -474,7 +474,7 @@ Red flags: ${activeFlags.length > 0 ? activeFlags.join("; ") : "None"}
 Score: ${s.total}/${s.maxTotal}`;
 
     try {
-      const res = await fetch("/api/claude", {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ model: "claude-sonnet-4-20250514", max_tokens: 1000, messages: [{ role: "user", content: prompt }] })
       });
